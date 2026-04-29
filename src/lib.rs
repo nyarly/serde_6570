@@ -18,7 +18,6 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, trace};
 
 use crate::parser::VarMod;
-use mattak_hypermedia::{Affordance, Operation};
 
 use self::{
     parser::{Parsed, Part},
@@ -64,8 +63,6 @@ pub enum Error {
     UnexpectedVariables(Vec<String>),
     #[error("capture deserialization: {0:?}")]
     Deserialization(#[from] de::UriDeserializationError),
-    #[error("hypermedia error: {0:?}")]
-    Hypermedia(#[from] mattak_hypermedia::Error),
 }
 
 impl IntoResponse for Error {
@@ -291,9 +288,7 @@ impl<C: Context + Listable> DynamicContext for PolicyContext<C> {
         }
         trace!(
             "on_expansion_start: provided: {:?} extra: {:?} missing {:?}",
-            self.provided,
-            self.extra,
-            self.missing
+            self.provided, self.extra, self.missing
         );
     }
 
@@ -306,9 +301,7 @@ impl<C: Context + Listable> DynamicContext for PolicyContext<C> {
         }
         trace!(
             "URI template fill: provided: {:?} extra: {:?} missing {:?}",
-            self.provided,
-            self.extra,
-            self.missing
+            self.provided, self.extra, self.missing
         );
         self.inner.visit(visitor)
     }
@@ -359,9 +352,9 @@ impl Entry {
         inner.template()
     }
 
-    pub fn affordance(&self, name: String, ops: Vec<Operation>) -> Result<Affordance, Error> {
+    pub fn is_closed(&self) -> bool {
         let inner = self.inner.read().expect("not poisoned");
-        inner.affordance(name, ops)
+        inner.is_closed()
     }
 
     pub fn hydra_type(&self) -> String {
@@ -405,18 +398,8 @@ impl InnerSingle {
             .collect()
     }
 
-    fn affordance(&self, name: String, ops: Vec<Operation>) -> Result<Affordance, Error> {
-        if self.expressions().is_empty() {
-            let empty = iri_string::template::simple_context::SimpleContext::new();
-            let id = self.template()?.expand(&empty)?.try_into()?;
-            Ok(Affordance::Link { id, operation: ops })
-        } else {
-            Ok(Affordance::IriTemplate {
-                id: name.try_into()?,
-                template: self.template()?,
-                operation: ops,
-            })
-        }
+    fn is_closed(&self) -> bool {
+        self.expressions().is_empty()
     }
 
     fn hydra_type(&self) -> String {
