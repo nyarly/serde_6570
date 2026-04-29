@@ -92,40 +92,6 @@ impl IntoResponse for Error {
         }
     }
 }
-/// This is used by the Route derive macro to validate that templates align with fields
-/// Not advised for general use - the parse of the template might panic, and isn't cached anywhere.
-/// Instead, see route_config
-pub fn template_vars(template: &str) -> Vec<String> {
-    let parsed = parser::parse(template).unwrap();
-
-    parsed
-        .parts_iter()
-        .filter_map(|part| match part {
-            Part::Lit(_) => None,
-            Part::Expression(expression)
-            | Part::SegVar(expression)
-            | Part::SegPathVar(expression)
-            | Part::SegRest(expression)
-            | Part::SegPathRest(expression) => Some(
-                expression
-                    .varspecs
-                    .iter()
-                    .map(|vs| vs.varname.clone())
-                    .collect::<Vec<_>>(),
-            ),
-        })
-        .flatten()
-        .collect::<Vec<_>>()
-}
-
-pub trait Route {
-    fn route_template() -> RouteTemplateString;
-
-    fn axum_route() -> String {
-        route_config(Self::route_template()).axum_route()
-    }
-}
-
 pub trait RouteTemplate: Debug + Clone + Hash + Send + Sync + Eq
 where
     Self: 'static,
@@ -452,22 +418,6 @@ impl InnerSingle {
             })
         }
     }
-    /*
-    let entry = |rm: RouteMap, ops| {
-        let prefixed = rm.prefixed(nested_at);
-        let url_attr = if prefixed.hydra_type() == "Link" {
-            "id"
-        } else {
-            "template"
-        };
-        let url_template = prefixed.template().expect("a legit URITemplate");
-        json!({
-            "type": prefixed.hydra_type(),
-            url_attr: url_template,
-            "operation": ops
-        })
-    };
-    */
 
     fn hydra_type(&self) -> String {
         if self.expressions().is_empty() {
@@ -505,7 +455,6 @@ impl InnerSingle {
         re
     }
 
-    // definitely consider caching this result
     fn regex(&self) -> Result<&Regex, regex::Error> {
         self.regex
             .get_or_init(|| Regex::new(&self.re_str()))
