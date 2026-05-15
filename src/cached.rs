@@ -1,0 +1,147 @@
+use crate::Serde6570;
+use crate::{Error, FillPolicy, InnerSingle, Listable, RouteTemplate, parsed};
+
+use hyper::Uri;
+use iri_string::template::Context;
+use iri_string::template::UriTemplateString;
+use iri_string::types::IriReferenceString;
+use serde::de::DeserializeOwned;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock, RwLock},
+};
+use typemap_ors::ShareMap;
+
+pub(crate) struct Map<RT: RouteTemplate> {
+    templates: HashMap<RT, String>,
+    store: HashMap<String, Arc<RwLock<InnerSingle>>>,
+}
+
+impl<RT: RouteTemplate> Default for Map<RT> {
+    fn default() -> Self {
+        Self {
+            templates: Default::default(),
+            store: Default::default(),
+        }
+    }
+}
+impl<RT: RouteTemplate> Map<RT> {
+    fn named(&mut self, rt: RT) -> Result<Arc<RwLock<InnerSingle>>, Error> {
+        let template = self
+            .templates
+            .entry(rt.clone())
+            .or_insert_with(|| format!("{};{:?}", rt.route_template(), rt.assoc_fields()));
+        if self.store.contains_key(template) {
+            self.store
+                .get(template)
+                .ok_or(Error::Parsing(
+                    "couldn't get value for contained key".to_string(),
+                ))
+                .cloned()
+        } else {
+            let route = Arc::new(RwLock::new(InnerSingle {
+                parsed: parsed(rt)?,
+                ..InnerSingle::default()
+            }));
+            self.store.insert(template.to_string(), route);
+            self.store
+                .get(template)
+                .ok_or(Error::Parsing(
+                    "couldn't get value for just-inserted key".to_string(),
+                ))
+                .cloned()
+        }
+    }
+}
+
+static THE_MAP: OnceLock<Arc<Mutex<ShareMap>>> = OnceLock::new();
+fn the_map<RT: RouteTemplate + 'static>() -> Arc<Mutex<Map<RT>>> {
+    let arcmutex = THE_MAP
+        .get_or_init(|| Arc::new(Mutex::new(ShareMap::custom())))
+        .clone();
+    let mut typed = arcmutex.lock().expect("type map not to be poisoned");
+    typed
+        .entry::<RTKey<RT>>()
+        .or_insert_with(|| Arc::new(Mutex::new(Map::<RT>::default())))
+        .clone()
+}
+
+struct RTKey<RT: RouteTemplate>(RT);
+
+impl<RT: RouteTemplate + 'static> typemap_ors::Key for RTKey<RT> {
+    type Value = Arc<Mutex<Map<RT>>>;
+}
+
+/// The general entry point for routing. Pass a RouteTemplate in to get its cached parse,
+/// as an Entry. From there you can call methods to template URIs, match strings etc etc.
+///
+/// # Panics
+///
+/// Panics if the routing cache becomes poisoned, which doesn't happen by design.
+/// A panic on this function constitutes a bug.
+pub fn route_config(rm: impl RouteTemplate + 'static) -> Entry {
+    let arcmutex = the_map();
+    let mut map = arcmutex.lock().expect("route map not to be poisoned");
+    let inner = map.named(rm).expect("routes to be parseable");
+    Entry {
+        inner: inner.clone(),
+    }
+}
+
+// Entry is a convenience wrapper around the Arc<RwLock<InnerSingle>> - mostly, it mediates reaching into the
+// smart pointers to manage the method calls.
+// We have a RwLock here because we would like to be able to cache rendering in the InnerSingle To
+// do that, we'd need to be able to accept a &mut self, or else replace the innersingle with a
+// cloned version where we update the values (imagine InnerSingle with OnceLocks for many of its
+// methods) at some point, we might also decide that a given InnerSingle is close enough to done
+// and finish its rendering, and have a FixedSingle or something. Or just start there: render out
+// all the things a given route might need and cache that. For the time being, we'll render each
+// time (and just get read locks), but at some point in the future there's another round of
+// over-engineering to tackle
+pub struct Entry {
+    inner: Arc<RwLock<InnerSingle>>,
+}
+
+impl Serde6570 for Entry {
+    fn axum_route(&self) -> String {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.axum_route()
+    }
+
+    fn serialize(
+        &self,
+        policy: FillPolicy,
+        context: impl serde::Serialize,
+    ) -> Result<IriReferenceString, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.serialize(policy, context)
+    }
+
+    fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.fill_uritemplate(FillPolicy::NoMissing, vars)
+    }
+
+    fn partial_fill(
+        &self,
+        vars: impl Context + Listable + Clone,
+    ) -> Result<UriTemplateString, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.partial_fill(vars)
+    }
+
+    fn template(&self) -> Result<UriTemplateString, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.template()
+    }
+
+    fn is_closed(&self) -> bool {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.is_closed()
+    }
+
+    fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.from_uri(url)
+    }
+}
