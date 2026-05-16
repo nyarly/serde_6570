@@ -32,6 +32,8 @@ pub use iri_string::template::context;
 pub trait Serde6570 {
     fn axum_route(&self) -> String;
 
+    fn prefixed(&self, prefix: &str) -> Self;
+
     fn serialize(
         &self,
         policy: FillPolicy,
@@ -104,7 +106,7 @@ impl IntoResponse for Error {
         }
     }
 }
-pub trait RouteTemplate: Debug + Clone + Hash + Send + Sync + Eq
+pub trait ResourceMapping: Debug + Clone + Hash + Send + Sync + Eq
 where
     Self: 'static,
 {
@@ -119,9 +121,9 @@ where
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct RouteTemplateString(pub String, pub Vec<String>);
+pub struct ResourceMappingString(pub String, pub Vec<String>);
 
-impl RouteTemplate for RouteTemplateString {
+impl ResourceMapping for ResourceMappingString {
     fn route_template(&self) -> String {
         self.0.clone()
     }
@@ -131,7 +133,7 @@ impl RouteTemplate for RouteTemplateString {
     }
 }
 
-fn parsed<RT: RouteTemplate>(rt: RT) -> Result<Parsed, Error> {
+fn parsed<RT: ResourceMapping>(rt: RT) -> Result<Parsed, Error> {
     let mut parsed =
         parser::parse(&rt.route_template()).map_err(|e| Error::Parsing(format!("{:?}", e)))?;
     parsed.annotate_assocs(rt.assoc_fields())?;
@@ -259,6 +261,15 @@ impl Serde6570 for InnerSingle {
         out
     }
 
+    fn prefixed(&self, prefix: &str) -> Self {
+        let mut prefixed = InnerSingle {
+            parsed: self.parsed.clone(),
+            regex: Default::default(),
+        };
+        prefixed.parsed.path.insert(0, Part::Lit(prefix.to_owned()));
+        prefixed
+    }
+
     fn serialize(
         &self,
         policy: FillPolicy,
@@ -329,12 +340,6 @@ impl InnerSingle {
             .filter(|part| !matches!(part, Part::Lit(_)))
             .cloned()
             .collect()
-    }
-
-    fn prefixed(&mut self, prefix: &str) -> Self {
-        let mut prefixed = InnerSingle { ..self.clone() };
-        prefixed.parsed.path.insert(0, Part::Lit(prefix.to_owned()));
-        prefixed
     }
 
     fn re_str(&self) -> String {

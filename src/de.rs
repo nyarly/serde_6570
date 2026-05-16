@@ -2,11 +2,12 @@ use hyper::Uri;
 
 use regex::Regex;
 use serde::{
+    Deserializer,
     de::{
         self, DeserializeSeed, EnumAccess, Error as SerdeError, MapAccess, SeqAccess,
         VariantAccess, Visitor,
     },
-    forward_to_deserialize_any, Deserializer,
+    forward_to_deserialize_any,
 };
 use std::{
     any::type_name,
@@ -17,7 +18,7 @@ use std::{
 };
 use tracing::trace;
 
-use crate::{render::var_re_name, Error, Parsed, Part, VarMod};
+use crate::{Error, Parsed, Part, VarMod, render::var_re_name};
 
 // *** Time being, this is cribbed wholesale from Axum
 
@@ -162,7 +163,10 @@ impl fmt::Display for ErrorKind {
                 )?;
 
                 if *expected == 1 {
-                    write!(f, ". Note that multiple parameters must be extracted with a tuple `Path<(_, _)>` or a struct `Path<YourParams>`")?;
+                    write!(
+                        f,
+                        ". Note that multiple parameters must be extracted with a tuple `Path<(_, _)>` or a struct `Path<YourParams>`"
+                    )?;
                 }
 
                 Ok(())
@@ -175,7 +179,10 @@ impl fmt::Display for ErrorKind {
                 )?;
 
                 if *expected == 1 {
-                    write!(f, ". Note that multiple parameters must be extracted with a tuple `Path<(_, _)>` or a struct `Path<YourParams>`")?;
+                    write!(
+                        f,
+                        ". Note that multiple parameters must be extracted with a tuple `Path<(_, _)>` or a struct `Path<YourParams>`"
+                    )?;
                 }
 
                 Ok(())
@@ -246,13 +253,13 @@ macro_rules! parse_single_value {
                     (_, VarBinding::QueryExplode(_)) | (_, VarBinding::Assoc(_, _)) => {
                         return Err(UriDeserializationError::new(ErrorKind::MismatchedValue {
                             expected_type: $ty,
-                        }))
+                        }));
                     }
                     (_, VarBinding::Empty) => {
                         return Err(UriDeserializationError::new(ErrorKind::ParseError {
                             value: "<empty>".to_string(),
                             expected_type: $ty,
-                        }))
+                        }));
                     }
                 };
                 visitor.$visit_fn(value)
@@ -1034,13 +1041,13 @@ impl<'de> Deserializer<'de> for UriDeserializer {
                 return Err(UriDeserializationError::invalid_value(
                     de::Unexpected::Str(&val.to_str()?),
                     &"an enum variant",
-                ))
+                ));
             }
             _ => {
                 return Err(UriDeserializationError::cant_fill_parameters(
                     self.varlist,
                     1,
-                ))
+                ));
             }
         }
     }
@@ -1509,7 +1516,7 @@ enum KeyOrIdx {
 
 #[cfg(test)]
 mod tests {
-    use crate::RouteTemplateString;
+    use crate::ResourceMappingString;
 
     use super::*;
     use serde::Deserialize;
@@ -1566,7 +1573,7 @@ mod tests {
     #[test]
     fn test_real_search_template() {
         //let rt = RouteTemplateString("/search{?query,kind}".into(), vec![]);
-        let rt = RouteTemplateString("/search{?query,extra*}".into(), vec!["extra".into()]);
+        let rt = ResourceMappingString("/search{?query,extra*}".into(), vec!["extra".into()]);
 
         let cfg = crate::routing::route_config(rt);
         let uri = hyper::Uri::from_static("http://example.com/search?query=test");
@@ -1591,7 +1598,7 @@ mod tests {
 
     #[test]
     fn test_path_style_parameter() {
-        let rt = RouteTemplateString("/search/{;query,extra*}".into(), vec!["extra".into()]);
+        let rt = ResourceMappingString("/search/{;query,extra*}".into(), vec!["extra".into()]);
         let cfg = crate::routing::route_config(rt);
         let uri = hyper::Uri::from_static("http://example.com/search/;query=test;kind=boardgame");
         let search: HashMap<String, String> =
@@ -1623,7 +1630,7 @@ mod tests {
 
     #[test]
     fn test_path_segment_assoc() {
-        let rt = RouteTemplateString("/search{/extra*}".into(), vec!["extra".into()]);
+        let rt = ResourceMappingString("/search{/extra*}".into(), vec!["extra".into()]);
         let cfg = crate::routing::route_config(rt);
         let uri = hyper::Uri::from_static("http://example.com/search/query=test/kind=boardgame");
         #[derive(Deserialize, Debug)]

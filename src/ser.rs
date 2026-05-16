@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{HashMap, hash_map},
     fmt::Display,
     rc::Rc,
     str,
@@ -7,14 +7,14 @@ use std::{
 };
 
 use serde::{
+    Serialize,
     ser::{
         self, Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
         SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
     },
-    Serialize,
 };
 
-use crate::{parser::VarSpec, FillPolicy, Parsed, VarMod};
+use crate::{FillPolicy, Parsed, VarMod, parser::VarSpec};
 
 use super::parser;
 
@@ -146,7 +146,7 @@ fn mapvars(
                     use FillPolicy::*;
                     match policy {
                         NoMissing | Strict => {
-                            return Err(Error::MissingNamedVariable(varspec.varname.clone()))
+                            return Err(Error::MissingNamedVariable(varspec.varname.clone()));
                         }
                         NoExtra | Relaxed => break,
                         DropMissing => {
@@ -190,7 +190,7 @@ fn mapvars(
                             return Err(Error::PrefixedComplexValue(
                                 "map".into(),
                                 name.as_ref().into(),
-                            ))
+                            ));
                         }
                         (VarMod::None, PathParam | Query | QueryCont) => {
                             resolved.push(name.clone());
@@ -231,7 +231,7 @@ fn mapvars(
                             return Err(Error::PrefixedComplexValue(
                                 "map".into(),
                                 name.as_ref().into(),
-                            ))
+                            ));
                         }
                         (VarMod::None, PathParam | Query | QueryCont) => {
                             resolved.push(name.clone());
@@ -421,8 +421,10 @@ fn escape_reserved(op: parser::Op, result: &mut Vec<Rc<str>>, val: &str) {
                 {
                     match rest.split_at(2) {
                         (
-                            hexdigs @
-                            [b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9', b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9'],
+                            hexdigs @ [
+                                b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9',
+                                b'A'..=b'F' | b'a'..=b'f' | b'0'..=b'9',
+                            ],
                             pctrest,
                         ) => {
                             result.push(Rc::from(
@@ -711,10 +713,10 @@ impl PositionSerializer {
             match policy {
                 Relaxed => (),
                 NoMissing | Strict if l < pos.len() => {
-                    return Err(Error::MissingPositionalFields(l, pos.len()))
+                    return Err(Error::MissingPositionalFields(l, pos.len()));
                 }
                 NoExtra | Strict if l > pos.len() => {
-                    return Err(Error::ExtraPositionalFields(l, pos.len()))
+                    return Err(Error::ExtraPositionalFields(l, pos.len()));
                 }
                 _ => (),
             }
@@ -804,10 +806,10 @@ impl NamedSerializer {
             match policy {
                 Relaxed => (),
                 NoMissing | Strict if l < field_count => {
-                    return Err(Error::MissingPositionalFields(l, field_count))
+                    return Err(Error::MissingPositionalFields(l, field_count));
                 }
                 NoExtra | Strict if l > field_count => {
-                    return Err(Error::ExtraPositionalFields(l, field_count))
+                    return Err(Error::ExtraPositionalFields(l, field_count));
                 }
                 _ => (),
             }
@@ -1494,7 +1496,7 @@ impl serde::Serializer for ValueSerializer {
 }
 #[cfg(test)]
 mod test {
-    use crate::{parsed, RouteTemplateString};
+    use crate::{ResourceMappingString, parsed};
 
     use super::*;
 
@@ -1555,7 +1557,7 @@ mod test {
         definitions.insert("empty_keys", List(vec![])); // XXX probably meant to be and empty map
         definitions.insert("undef", Null);
 
-        let rt = RouteTemplateString(template.into(), vec![]);
+        let rt = ResourceMappingString(template.into(), vec![]);
 
         let parsed = parsed(rt).expect("test template to parse");
 

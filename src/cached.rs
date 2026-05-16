@@ -1,5 +1,5 @@
 use crate::Serde6570;
-use crate::{Error, FillPolicy, InnerSingle, Listable, RouteTemplate, parsed};
+use crate::{Error, FillPolicy, InnerSingle, Listable, ResourceMapping, parsed};
 
 use hyper::Uri;
 use iri_string::template::Context;
@@ -12,12 +12,12 @@ use std::{
 };
 use typemap_ors::ShareMap;
 
-pub(crate) struct Map<RT: RouteTemplate> {
-    templates: HashMap<RT, String>,
+pub(crate) struct Map<RM: ResourceMapping> {
+    templates: HashMap<RM, String>,
     store: HashMap<String, Arc<RwLock<InnerSingle>>>,
 }
 
-impl<RT: RouteTemplate> Default for Map<RT> {
+impl<RM: ResourceMapping> Default for Map<RM> {
     fn default() -> Self {
         Self {
             templates: Default::default(),
@@ -25,8 +25,8 @@ impl<RT: RouteTemplate> Default for Map<RT> {
         }
     }
 }
-impl<RT: RouteTemplate> Map<RT> {
-    fn named(&mut self, rt: RT) -> Result<Arc<RwLock<InnerSingle>>, Error> {
+impl<RM: ResourceMapping> Map<RM> {
+    fn named(&mut self, rt: RM) -> Result<Arc<RwLock<InnerSingle>>, Error> {
         let template = self
             .templates
             .entry(rt.clone())
@@ -55,21 +55,21 @@ impl<RT: RouteTemplate> Map<RT> {
 }
 
 static THE_MAP: OnceLock<Arc<Mutex<ShareMap>>> = OnceLock::new();
-fn the_map<RT: RouteTemplate + 'static>() -> Arc<Mutex<Map<RT>>> {
+fn the_map<RM: ResourceMapping + 'static>() -> Arc<Mutex<Map<RM>>> {
     let arcmutex = THE_MAP
         .get_or_init(|| Arc::new(Mutex::new(ShareMap::custom())))
         .clone();
     let mut typed = arcmutex.lock().expect("type map not to be poisoned");
     typed
-        .entry::<RTKey<RT>>()
-        .or_insert_with(|| Arc::new(Mutex::new(Map::<RT>::default())))
+        .entry::<RMKey<RM>>()
+        .or_insert_with(|| Arc::new(Mutex::new(Map::<RM>::default())))
         .clone()
 }
 
-struct RTKey<RT: RouteTemplate>(RT);
+struct RMKey<RM: ResourceMapping>(RM);
 
-impl<RT: RouteTemplate + 'static> typemap_ors::Key for RTKey<RT> {
-    type Value = Arc<Mutex<Map<RT>>>;
+impl<RM: ResourceMapping + 'static> typemap_ors::Key for RMKey<RM> {
+    type Value = Arc<Mutex<Map<RM>>>;
 }
 
 /// The general entry point for routing. Pass a RouteTemplate in to get its cached parse,
@@ -79,17 +79,19 @@ impl<RT: RouteTemplate + 'static> typemap_ors::Key for RTKey<RT> {
 ///
 /// Panics if the routing cache becomes poisoned, which doesn't happen by design.
 /// A panic on this function constitutes a bug.
-pub fn route_config(rm: impl RouteTemplate + 'static) -> Entry {
+pub fn route_config<RM: ResourceMapping + 'static>(rm: RM) -> Entry {
     let arcmutex = the_map();
     let mut map = arcmutex.lock().expect("route map not to be poisoned");
     let inner = map.named(rm).expect("routes to be parseable");
     Entry {
         inner: inner.clone(),
+        prefixes: Default::default(),
     }
 }
 
 // Entry is a convenience wrapper around the Arc<RwLock<InnerSingle>> - mostly, it mediates reaching into the
 // smart pointers to manage the method calls.
+//
 // We have a RwLock here because we would like to be able to cache rendering in the InnerSingle To
 // do that, we'd need to be able to accept a &mut self, or else replace the innersingle with a
 // cloned version where we update the values (imagine InnerSingle with OnceLocks for many of its
@@ -98,14 +100,37 @@ pub fn route_config(rm: impl RouteTemplate + 'static) -> Entry {
 // all the things a given route might need and cache that. For the time being, we'll render each
 // time (and just get read locks), but at some point in the future there's another round of
 // over-engineering to tackle
+#[derive(Clone)]
 pub struct Entry {
     inner: Arc<RwLock<InnerSingle>>,
+    prefixes: Arc<Mutex<HashMap<String, Entry>>>,
 }
 
 impl Serde6570 for Entry {
     fn axum_route(&self) -> String {
         let inner = self.inner.read().expect("not poisoned");
         inner.axum_route()
+    }
+
+    fn prefixed(&self, prefix: &str) -> Self {
+        let mut map = self.prefixes.lock().expect("prefix map not to be poisoned");
+
+        if map.contains_key(prefix) {
+            map.get(prefix)
+                .expect("couldn't get value for contained key")
+                .clone()
+        } else {
+            let inner = self.inner.read().expect("not poisoned");
+            let prefixed = inner.prefixed(prefix);
+            let entry = Entry {
+                inner: Arc::new(RwLock::new(prefixed)),
+                prefixes: Default::default(),
+            };
+            map.insert(prefix.to_string(), entry);
+            map.get(prefix)
+                .expect("couldn't get value for just-inserted key")
+                .clone()
+        }
     }
 
     fn serialize(
@@ -130,6 +155,11 @@ impl Serde6570 for Entry {
         inner.partial_fill(vars)
     }
 
+    fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.from_uri(url)
+    }
+
     fn template(&self) -> Result<UriTemplateString, Error> {
         let inner = self.inner.read().expect("not poisoned");
         inner.template()
@@ -138,10 +168,5 @@ impl Serde6570 for Entry {
     fn is_closed(&self) -> bool {
         let inner = self.inner.read().expect("not poisoned");
         inner.is_closed()
-    }
-
-    fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
-        let inner = self.inner.read().expect("not poisoned");
-        inner.from_uri(url)
     }
 }
