@@ -30,7 +30,9 @@ mod ser;
 pub use iri_string::template::context;
 
 pub trait Serde6570 {
-    fn axum_route(&self) -> String;
+    fn matchit_route(&self) -> String;
+
+    fn regex(&self) -> Result<Regex, Error>;
 
     fn prefixed(&self, prefix: &str) -> Self;
 
@@ -42,10 +44,7 @@ pub trait Serde6570 {
 
     fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error>;
 
-    fn partial_fill(
-        &self,
-        vars: impl Context + Listable + Clone,
-    ) -> Result<UriTemplateString, Error>;
+    fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error>;
 
     fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
 
@@ -239,11 +238,10 @@ impl<C: Context + Listable> DynamicContext for PolicyContext<C> {
 #[derive(Default, Clone)]
 struct InnerSingle {
     parsed: Parsed,
-    regex: OnceLock<Result<Regex, regex::Error>>,
 }
 
 impl Serde6570 for InnerSingle {
-    fn axum_route(&self) -> String {
+    fn matchit_route(&self) -> String {
         let mut out = "".to_string();
 
         for part in &self.parsed.path {
@@ -259,6 +257,13 @@ impl Serde6570 for InnerSingle {
         }
 
         out
+    }
+
+    fn regex(&self) -> Result<Regex, Error> {
+        self.regex
+            .get_or_init(|| Regex::new(&self.re_str()))
+            .clone()
+            .map_err(|e| e.clone().into())
     }
 
     fn prefixed(&self, prefix: &str) -> Self {
@@ -282,42 +287,15 @@ impl Serde6570 for InnerSingle {
         self.fill_uritemplate(FillPolicy::NoMissing, vars)
     }
 
-    fn partial_fill(
-        &self,
-        vars: impl Context + Listable + Clone,
-    ) -> Result<UriTemplateString, Error> {
-        let filled_string = self
-            .parsed
-            .auth
-            .clone()
-            .map_or(Ok(vec![]), |a| fill_parts(&a, &vars))?
-            .iter()
-            .map(original_string)
-            .chain(
-                fill_parts(&self.parsed.path, &vars)?
-                    .iter()
-                    .map(original_string),
-            )
-            .chain(
-                self.parsed
-                    .query
-                    .clone()
-                    .map_or(Ok(vec![]), |q| fill_parts(&q, &vars))?
-                    .iter()
-                    .map(original_string),
-            )
-            .collect::<Vec<_>>()
-            .join("");
-
-        let t = UriTemplateStr::new(&filled_string)?;
-        Ok(t.into())
+    fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error> {
+        self.partial_fill_single(vars)
     }
 
     fn from_uri<T: DeserializeOwned>(&self, uri: Uri) -> Result<T, Error> {
         let parsed = &self.parsed;
         let regex = self.regex()?;
 
-        let de = de::UriDeserializer::for_uri(&uri, parsed, regex)?;
+        let de = de::UriDeserializer::for_uri(&uri, parsed, &regex)?;
 
         T::deserialize(de).map_err(Error::from)
     }
@@ -355,19 +333,36 @@ impl InnerSingle {
         re
     }
 
-    fn regex(&self) -> Result<&Regex, regex::Error> {
-        self.regex
-            .get_or_init(|| Regex::new(&self.re_str()))
-            .as_ref()
-            .map_err(|e| e.clone())
-    }
-
     fn template_string(&self) -> String {
         self.parsed
             .parts_iter()
             .map(original_string)
             .collect::<Vec<_>>()
             .join("")
+    }
+
+    fn partial_fill_single(&self, vars: impl Context + Listable + Clone) -> Result<Self, Error> {
+        let mut prefixed = InnerSingle {
+            parsed: self.parsed.clone(),
+            regex: Default::default(),
+        };
+        prefixed
+            .parsed
+            .auth
+            .as_ref()
+            .map(|a| fill_parts(&a, &vars))
+            .transpose()?;
+
+        prefixed.parsed.path = fill_parts(&self.parsed.path, &vars)?;
+
+        prefixed.parsed.query = self
+            .parsed
+            .query
+            .as_ref()
+            .map(|q| fill_parts(&q, &vars))
+            .transpose()?;
+
+        Ok(prefixed)
     }
 
     fn fill_uritemplate(
@@ -414,7 +409,7 @@ mod test {
 
     #[test]
     fn prefixing() {
-        let mut route = quick_route("http://example.com/user/{user_id}{?something,mysterious}");
+        let route = quick_route("http://example.com/user/{user_id}{?something,mysterious}");
         let prefixed = route.prefixed("/api");
         assert_eq!(
             prefixed.template_string(),
@@ -430,7 +425,6 @@ mod test {
         vars.insert("something".to_string(), "S".to_string());
         vars.insert("mysterious".to_string(), "M".to_string());
         let tmpl_r = route.partial_fill(VarsList(vars));
-        debug!("{:?}", tmpl_r);
         let tmpl = tmpl_r.unwrap();
         assert_eq!(
             tmpl.to_string(),
@@ -441,7 +435,7 @@ mod test {
     #[test]
     fn axum_routes() {
         let rc = quick_route("/api/event/{event_id}");
-        assert_eq!(rc.axum_route(), "/api/event/:event_id".to_string());
+        assert_eq!(rc.matchit_route(), "/api/event/:event_id".to_string());
     }
     /*
      * Considerations for regexp:

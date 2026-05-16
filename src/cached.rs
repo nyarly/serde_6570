@@ -107,9 +107,14 @@ pub struct Entry {
 }
 
 impl Serde6570 for Entry {
-    fn axum_route(&self) -> String {
+    fn matchit_route(&self) -> String {
         let inner = self.inner.read().expect("not poisoned");
-        inner.axum_route()
+        inner.matchit_route()
+    }
+
+    fn regex(&self) -> Result<regex::Regex, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.regex()
     }
 
     fn prefixed(&self, prefix: &str) -> Self {
@@ -147,12 +152,9 @@ impl Serde6570 for Entry {
         inner.fill_uritemplate(FillPolicy::NoMissing, vars)
     }
 
-    fn partial_fill(
-        &self,
-        vars: impl Context + Listable + Clone,
-    ) -> Result<UriTemplateString, Error> {
+    fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error> {
         let inner = self.inner.read().expect("not poisoned");
-        inner.partial_fill(vars)
+        inner.partial_fill_single(vars)
     }
 
     fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
