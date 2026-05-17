@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::OnceLock};
+use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
 use axum::{http, response::IntoResponse};
 use hyper::Uri;
@@ -46,14 +46,27 @@ pub trait Serde6570 {
 
     fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error>;
 
-    fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
+    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
 
     fn template(&self) -> Result<UriTemplateString, Error>;
 
     fn is_closed(&self) -> bool;
 }
 
-#[derive(thiserror::Error, Debug)]
+/// The general entry point for routing. Pass a ResourceMapping in to get its cached parse,
+/// as an Entry. From there you can call methods to template URIs, match strings etc etc.
+///
+/// # Panics
+///
+/// Panics if the routing cache becomes poisoned, which doesn't happen by design.
+/// A panic on this function constitutes a bug.
+pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> impl Serde6570 {
+    InnerSingle {
+        parsed: parsed(rm).unwrap(),
+    }
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error("error processing IRI template: {0:?}")]
@@ -82,6 +95,7 @@ pub enum Error {
     Deserialization(#[from] de::UriDeserializationError),
 }
 
+// XXX required here for coherence?
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         use http::status::StatusCode;
@@ -105,6 +119,7 @@ impl IntoResponse for Error {
         }
     }
 }
+
 pub trait ResourceMapping: Debug + Clone + Hash + Send + Sync + Eq
 where
     Self: 'static,
@@ -260,16 +275,12 @@ impl Serde6570 for InnerSingle {
     }
 
     fn regex(&self) -> Result<Regex, Error> {
-        self.regex
-            .get_or_init(|| Regex::new(&self.re_str()))
-            .clone()
-            .map_err(|e| e.clone().into())
+        Regex::new(&self.re_str()).map_err(|e| e.into())
     }
 
     fn prefixed(&self, prefix: &str) -> Self {
         let mut prefixed = InnerSingle {
             parsed: self.parsed.clone(),
-            regex: Default::default(),
         };
         prefixed.parsed.path.insert(0, Part::Lit(prefix.to_owned()));
         prefixed
@@ -291,7 +302,7 @@ impl Serde6570 for InnerSingle {
         self.partial_fill_single(vars)
     }
 
-    fn from_uri<T: DeserializeOwned>(&self, uri: Uri) -> Result<T, Error> {
+    fn contract<T: DeserializeOwned>(&self, uri: Uri) -> Result<T, Error> {
         let parsed = &self.parsed;
         let regex = self.regex()?;
 
@@ -344,7 +355,6 @@ impl InnerSingle {
     fn partial_fill_single(&self, vars: impl Context + Listable + Clone) -> Result<Self, Error> {
         let mut prefixed = InnerSingle {
             parsed: self.parsed.clone(),
-            regex: Default::default(),
         };
         prefixed
             .parsed
@@ -424,7 +434,7 @@ mod test {
         let mut vars = HashMap::new();
         vars.insert("something".to_string(), "S".to_string());
         vars.insert("mysterious".to_string(), "M".to_string());
-        let tmpl_r = route.partial_fill(VarsList(vars));
+        let tmpl_r = route.partial_fill(VarsList(vars)).unwrap().template();
         let tmpl = tmpl_r.unwrap();
         assert_eq!(
             tmpl.to_string(),

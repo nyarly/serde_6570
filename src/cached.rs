@@ -5,6 +5,7 @@ use hyper::Uri;
 use iri_string::template::Context;
 use iri_string::template::UriTemplateString;
 use iri_string::types::IriReferenceString;
+use regex::Regex;
 use serde::de::DeserializeOwned;
 use std::{
     collections::HashMap,
@@ -14,7 +15,7 @@ use typemap_ors::ShareMap;
 
 pub(crate) struct Map<RM: ResourceMapping> {
     templates: HashMap<RM, String>,
-    store: HashMap<String, Arc<RwLock<InnerSingle>>>,
+    store: HashMap<String, Entry>,
 }
 
 impl<RM: ResourceMapping> Default for Map<RM> {
@@ -26,7 +27,7 @@ impl<RM: ResourceMapping> Default for Map<RM> {
     }
 }
 impl<RM: ResourceMapping> Map<RM> {
-    fn named(&mut self, rt: RM) -> Result<Arc<RwLock<InnerSingle>>, Error> {
+    fn named(&mut self, rt: RM) -> Result<Entry, Error> {
         let template = self
             .templates
             .entry(rt.clone())
@@ -39,10 +40,13 @@ impl<RM: ResourceMapping> Map<RM> {
                 ))
                 .cloned()
         } else {
-            let route = Arc::new(RwLock::new(InnerSingle {
-                parsed: parsed(rt)?,
-                ..InnerSingle::default()
-            }));
+            let route = Entry {
+                inner: Arc::new(RwLock::new(InnerSingle {
+                    parsed: parsed(rt)?,
+                })),
+                prefixes: Default::default(),
+                regex: Default::default(),
+            };
             self.store.insert(template.to_string(), route);
             self.store
                 .get(template)
@@ -72,21 +76,17 @@ impl<RM: ResourceMapping + 'static> typemap_ors::Key for RMKey<RM> {
     type Value = Arc<Mutex<Map<RM>>>;
 }
 
-/// The general entry point for routing. Pass a RouteTemplate in to get its cached parse,
+/// The general entry point for routing. Pass a ResourceMapping in to get its cached parse,
 /// as an Entry. From there you can call methods to template URIs, match strings etc etc.
 ///
 /// # Panics
 ///
 /// Panics if the routing cache becomes poisoned, which doesn't happen by design.
 /// A panic on this function constitutes a bug.
-pub fn route_config<RM: ResourceMapping + 'static>(rm: RM) -> Entry {
+pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> impl Serde6570 {
     let arcmutex = the_map();
     let mut map = arcmutex.lock().expect("route map not to be poisoned");
-    let inner = map.named(rm).expect("routes to be parseable");
-    Entry {
-        inner: inner.clone(),
-        prefixes: Default::default(),
-    }
+    map.named(rm).expect("routes to be parseable")
 }
 
 // Entry is a convenience wrapper around the Arc<RwLock<InnerSingle>> - mostly, it mediates reaching into the
@@ -104,6 +104,7 @@ pub fn route_config<RM: ResourceMapping + 'static>(rm: RM) -> Entry {
 pub struct Entry {
     inner: Arc<RwLock<InnerSingle>>,
     prefixes: Arc<Mutex<HashMap<String, Entry>>>,
+    regex: OnceLock<Result<Regex, Error>>,
 }
 
 impl Serde6570 for Entry {
@@ -113,8 +114,12 @@ impl Serde6570 for Entry {
     }
 
     fn regex(&self) -> Result<regex::Regex, Error> {
-        let inner = self.inner.read().expect("not poisoned");
-        inner.regex()
+        self.regex
+            .get_or_init(|| {
+                let inner = self.inner.read().expect("not poisoned");
+                inner.regex()
+            })
+            .clone()
     }
 
     fn prefixed(&self, prefix: &str) -> Self {
@@ -130,6 +135,7 @@ impl Serde6570 for Entry {
             let entry = Entry {
                 inner: Arc::new(RwLock::new(prefixed)),
                 prefixes: Default::default(),
+                regex: Default::default(),
             };
             map.insert(prefix.to_string(), entry);
             map.get(prefix)
@@ -157,9 +163,9 @@ impl Serde6570 for Entry {
         inner.partial_fill_single(vars)
     }
 
-    fn from_uri<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
+    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
         let inner = self.inner.read().expect("not poisoned");
-        inner.from_uri(url)
+        inner.contract(url)
     }
 
     fn template(&self) -> Result<UriTemplateString, Error> {

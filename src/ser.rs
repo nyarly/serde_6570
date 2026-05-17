@@ -18,7 +18,7 @@ use crate::{FillPolicy, Parsed, VarMod, parser::VarSpec};
 
 use super::parser;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
     #[error("custom error: {0}")]
     CustomError(String),

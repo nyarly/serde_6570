@@ -1,13 +1,13 @@
 use std::rc::Rc;
 
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::tag,
     character::complete::{self as character, char, one_of, satisfy},
     combinator::{all_consuming, map, map_opt, map_parser, opt, recognize, value},
     multi::{fold_many_m_n, many0, many0_count, many1, many1_count, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair, tuple},
-    IResult,
 };
 
 /*
@@ -149,7 +149,7 @@ pub(super) struct Parsed {
     pub(super) query_assoc: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
     #[error("assoc provided for {1}, but {0} is already a path assoc")]
     ExtraPathAssoc(String, String),
@@ -190,7 +190,7 @@ impl Parsed {
                                 modifier: VarMod::Explode,
                             } if *vn == asc => match path_assoc {
                                 Some(ref name) => {
-                                    return Err(Error::ExtraPathAssoc(name.clone(), asc.clone()))
+                                    return Err(Error::ExtraPathAssoc(name.clone(), asc.clone()));
                                 }
                                 None => {
                                     matched = true;
@@ -211,7 +211,7 @@ impl Parsed {
                                 modifier: VarMod::Explode,
                             } if *vn == asc => match query_assoc {
                                 Some(ref name) => {
-                                    return Err(Error::ExtraQueryAssoc(name.clone(), asc.clone()))
+                                    return Err(Error::ExtraQueryAssoc(name.clone(), asc.clone()));
                                 }
                                 None => {
                                     matched = true;
@@ -700,8 +700,8 @@ mod nomnumber {
     use std::ops::{RangeFrom, RangeTo};
 
     use nom::{
-        error::{ErrorKind, ParseError},
         AsBytes, AsChar, IResult, InputLength, InputTakeAtPosition, Slice,
+        error::{ErrorKind, ParseError},
     };
 
     #[inline]

@@ -26,7 +26,7 @@ use crate::{Error, Parsed, Part, VarMod, render::var_re_name};
 
 // this wrapper type is used as the deserializer error to hide the `serde::de::Error` impl which
 // would otherwise be public if we used `ErrorKind` as the error directly
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UriDeserializationError {
     pub(super) kind: ErrorKind,
 }
@@ -84,7 +84,7 @@ impl fmt::Display for UriDeserializationError {
 
 impl std::error::Error for UriDeserializationError {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// The URI contained the wrong number of parameters.
@@ -1517,6 +1517,7 @@ enum KeyOrIdx {
 #[cfg(test)]
 mod tests {
     use crate::ResourceMappingString;
+    use crate::Serde6570;
 
     use super::*;
     use serde::Deserialize;
@@ -1575,17 +1576,15 @@ mod tests {
         //let rt = RouteTemplateString("/search{?query,kind}".into(), vec![]);
         let rt = ResourceMappingString("/search{?query,extra*}".into(), vec!["extra".into()]);
 
-        let cfg = crate::routing::route_config(rt);
+        let cfg = crate::process(rt);
         let uri = hyper::Uri::from_static("http://example.com/search?query=test");
-        let search: HashMap<String, String> =
-            crate::routing::Entry::from_uri(&cfg, uri.clone()).expect("deserialize");
+        let search: HashMap<String, String> = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
             "test",
             search.get("query").expect("query to be deserialized")
         );
         let uri = hyper::Uri::from_static("http://example.com/search?query=test&kind=boardgame");
-        let search: HashMap<String, String> =
-            crate::routing::Entry::from_uri(&cfg, uri.clone()).expect("deserialize");
+        let search: HashMap<String, String> = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
             "test",
             search.get("query").expect("query to be deserialized")
@@ -1599,10 +1598,9 @@ mod tests {
     #[test]
     fn test_path_style_parameter() {
         let rt = ResourceMappingString("/search/{;query,extra*}".into(), vec!["extra".into()]);
-        let cfg = crate::routing::route_config(rt);
+        let cfg = crate::process(rt);
         let uri = hyper::Uri::from_static("http://example.com/search/;query=test;kind=boardgame");
-        let search: HashMap<String, String> =
-            crate::routing::Entry::from_uri(&cfg, uri.clone()).expect("deserialize");
+        let search: HashMap<String, String> = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
             "test",
             search.get("query").expect("query to be deserialized")
@@ -1616,8 +1614,7 @@ mod tests {
             query: String,
             extra: HashMap<String, String>,
         }
-        let search_struct: Search =
-            crate::routing::Entry::from_uri(&cfg, uri.clone()).expect("deserialize");
+        let search_struct: Search = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!("test", &search_struct.query);
         assert_eq!(
             "boardgame",
@@ -1631,14 +1628,13 @@ mod tests {
     #[test]
     fn test_path_segment_assoc() {
         let rt = ResourceMappingString("/search{/extra*}".into(), vec!["extra".into()]);
-        let cfg = crate::routing::route_config(rt);
+        let cfg = crate::process(rt);
         let uri = hyper::Uri::from_static("http://example.com/search/query=test/kind=boardgame");
         #[derive(Deserialize, Debug)]
         struct Search {
             extra: HashMap<String, String>,
         }
-        let search_struct: Search =
-            crate::routing::Entry::from_uri(&cfg, uri.clone()).expect("deserialize");
+        let search_struct: Search = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
             search_struct
                 .extra
