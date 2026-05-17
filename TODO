@@ -1,5 +1,3 @@
-* expand/contract
 * gate the cached mod with a feature, typemap_ors also gated
 * test against rfc 6570 test set (c.f. ...)
-* fix Regex in cached
 * does cached::Entry need an RwLock?
