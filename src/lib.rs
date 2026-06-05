@@ -299,7 +299,7 @@ impl Serde6570 for InnerSingle {
         for part in &self.parsed.path {
             match part {
                 Part::Lit(l) => out.push_str(l),
-                Part::Expression(exp) | Part::SegVar(exp) | Part::SegPathVar(exp) => {
+                Part::Expression(exp) | Part::SegPathVar(exp) => {
                     out.push_str(&axum7_vars(&exp.varspecs))
                 }
                 Part::SegRest(exp) | Part::SegPathRest(exp) => {

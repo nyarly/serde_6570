@@ -245,7 +245,6 @@ impl Parsed {
 pub(super) enum Part {
     Lit(String),
     Expression(Expression),
-    SegVar(Expression),
     SegPathVar(Expression),
     SegRest(Expression),
     SegPathRest(Expression),
@@ -266,7 +265,6 @@ impl Part {
         match self {
             Part::Lit(_) => None,
             Part::Expression(expression)
-            | Part::SegVar(expression)
             | Part::SegPathVar(expression)
             | Part::SegRest(expression)
             | Part::SegPathRest(expression) => Some(&expression),
@@ -416,7 +414,6 @@ fn authority(i: &str) -> NomResult<'_, Vec<Part>> {
 // segment = segment-literal / segment-variable / segment-pathvar
 fn segment(i: &str) -> NomResult<'_, Vec<Part>> {
     alt((segment_pathvar, segment_exps_and_lits))(i)
-    //alt((segment_variable, segment_pathvar, segment_literal))(i)
 }
 
 // segment-pathvar = "{/" segment-variable-list "}"
@@ -456,25 +453,6 @@ fn segment_exps_and_lits(i: &str) -> NomResult<'_, Vec<Part>> {
             parts.insert(0, Part::to_lit("/"));
             parts
         },
-    )(i)
-}
-
-// segment-variable = "/{" [ "+" ] segment-variable-list "}"
-fn segment_variable(i: &str) -> NomResult<'_, Part> {
-    map(
-        map(
-            delimited(tag("/{"), pair(opt(char('+')), segment_var_list), tag("}")),
-            Expression::from_pair,
-        ),
-        Part::SegVar,
-    )(i)
-}
-
-// segment-literal = "/" *pchar
-fn segment_literal(i: &str) -> NomResult<'_, Part> {
-    map(
-        recognize(preceded(char('/'), many1_count(pchar))), // test "/" path
-        Part::to_lit,
     )(i)
 }
 
@@ -1163,23 +1141,6 @@ mod test {
                         }]
                     })
                 ]
-            ))
-        )
-    }
-
-    #[test]
-    fn test_segment_variable() {
-        assert_eq!(
-            segment_variable("/{user_id}"),
-            Ok((
-                "",
-                Part::SegVar(Expression {
-                    operator: Op::Simple,
-                    varspecs: vec![VarSpec {
-                        varname: "user_id".to_string(),
-                        modifier: VarMod::None
-                    }]
-                })
             ))
         )
     }

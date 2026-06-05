@@ -96,7 +96,6 @@ pub(super) fn auth_re_string(part: &Part) -> String {
         Part::Expression(exp)
         | Part::SegPathVar(exp)
         | Part::SegPathRest(exp)
-        | Part::SegVar(exp)
         | Part::SegRest(exp) => exp_re(exp, EMPTY, SLASH),
     }
 }
@@ -107,7 +106,7 @@ pub(super) fn path_re_string(part: &Part) -> String {
         Part::Expression(exp) | Part::SegPathVar(exp) | Part::SegPathRest(exp) => {
             exp_re(exp, SLASH, QUERYTERM)
         }
-        Part::SegVar(exp) | Part::SegRest(exp) => format!("/{}", exp_re(exp, SLASH, QUERYTERM)),
+        Part::SegRest(exp) => format!("/{}", exp_re(exp, SLASH, QUERYTERM)),
     }
 }
 
@@ -158,10 +157,7 @@ fn var_re(op: Op, here: &'static str, nxt: &'static str) -> impl Fn(&VarSpec) ->
 pub(super) fn original_string(part: &Part) -> String {
     match part {
         Part::Lit(s) => s.clone(),
-        Part::SegVar(exp)
-        | Part::Expression(exp)
-        | Part::SegPathVar(exp)
-        | Part::SegPathRest(exp) => exp_string(exp),
+        Part::Expression(exp) | Part::SegPathVar(exp) | Part::SegPathRest(exp) => exp_string(exp),
         Part::SegRest(exp) => format!("/{}", exp_string(exp)),
     }
 }
@@ -175,7 +171,6 @@ pub(super) fn fill_parts(
         match part {
             Part::Lit(_) => new_partlist.push(part.clone()),
             Part::Expression(exp) => new_partlist.extend(fill_part(exp, vars, Part::Expression)?),
-            Part::SegVar(exp) => new_partlist.extend(fill_part(exp, vars, Part::SegVar)?),
             Part::SegPathVar(exp) => new_partlist.extend(fill_part(exp, vars, Part::SegPathVar)?),
             Part::SegRest(exp) => new_partlist.extend(fill_part(exp, vars, Part::SegRest)?),
             Part::SegPathRest(exp) => new_partlist.extend(fill_part(exp, vars, Part::SegPathRest)?),

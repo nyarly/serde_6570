@@ -413,7 +413,6 @@ fn parsed_template_vars(parsed: &Parsed) -> Vec<Rc<str>> {
         .filter_map(|part| match part {
             Part::Lit(_) => None,
             Part::Expression(expression)
-            | Part::SegVar(expression)
             | Part::SegPathVar(expression)
             | Part::SegRest(expression)
             | Part::SegPathRest(expression) => Some(

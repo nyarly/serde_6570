@@ -106,7 +106,7 @@ fn mapexprs(
                 SegPathVar(expression) | SegPathRest(expression) | Expression(expression) => {
                     mapvars(expression, policy, &bindings)
                 }
-                SegVar(expression) | SegRest(expression) => {
+                SegRest(expression) => {
                     mapvars(expression, policy, &bindings).map(|mut vec| {
                         vec.insert(0, SLASH.clone()); // XXX perf O(n)!
                         vec
