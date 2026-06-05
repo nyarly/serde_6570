@@ -12,9 +12,10 @@ repository = "https://github.com/nyarly/serde_6570"
 description = "A Serde implementation for a subset of RFC 6570 URI Template"
 
 exclude = [
-    "/test/testcases", # submodule from the RFC 6570 project
+    "tests/conformance_test.rs",
+    "/tests/testcases", # submodule from the RFC 6570 project
     "flake.*",
-    "TODO",
+    "TODO"
 ]
 
 [dependencies]
