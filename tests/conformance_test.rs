@@ -36,10 +36,10 @@ fn conforms() {
     let testcases: HashMap<String, TestCase> = serde_json::from_str(testdata).unwrap();
 
     // XXX must doc: serde_6570 resource mappings must parse as a URI
-    let uri_re = Regex::new("://|^/").expect("regex to parse");
+    let uri_re = Regex::new("://|^/|^[{]/").expect("regex to parse");
 
     for (group, testcase) in testcases {
-        if testcase.level > 1 {
+        if testcase.level > 3 {
             continue;
         }
         for (validator, mut tmpl, expected) in table_test!(testcase.testcases) {
@@ -73,7 +73,7 @@ fn conforms() {
                         .given(&format!("{group} - {tmpl}"))
                         .when("expanded")
                         .then(&format!("{uri_value:?} should be one of {ex:?}"))
-                        .assert_eq(true, ex.iter().any(|i| i.to_string() == uri_value))
+                        .assert_eq(true, ex.iter().any(|i| i.to_string() == uri_value.clone()))
                 }
                 (Err(e), _) => validator
                     .given(&format!("{group} - {tmpl}"))

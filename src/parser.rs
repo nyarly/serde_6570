@@ -441,7 +441,11 @@ fn segment_exps_and_lits(i: &str) -> NomResult<'_, Vec<Part>> {
                 ),
                 map(
                     map(
-                        delimited(tag("{"), pair(opt(char('+')), segment_var_list), tag("}")),
+                        delimited(
+                            tag("{"),
+                            pair(opt(path_operator), segment_var_list),
+                            tag("}"),
+                        ),
                         Expression::from_pair,
                     ),
                     Part::Expression, //XXX
@@ -631,6 +635,10 @@ fn mod_explode(i: &str) -> NomResult<'_, VarMod> {
 // op-reserve    =  "=" / "," / "!" / "@" / "|"
 fn operator(i: &str) -> NomResult<'_, char> {
     one_of("+.;&=,!@|/#?")(i)
+}
+
+fn path_operator(i: &str) -> NomResult<'_, char> {
+    one_of("+.;,!@|#")(i)
 }
 
 // tail_operator = operator - ?#/, used in "rest" path matches
@@ -844,6 +852,38 @@ mod test {
             parsed.annotate_assocs(vec!["foo".into(), "bar".into()]),
             Err(_)
         ));
+    }
+
+    #[test]
+    fn test_fragment_then_path() {
+        let input = "/{#path,x}/here";
+        assert_eq!(
+            parse(input),
+            Ok(Parsed {
+                auth: None,
+                path: vec![
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
+                        operator: Op::Fragment,
+                        varspecs: vec![
+                            VarSpec {
+                                varname: "path".to_string(),
+                                modifier: VarMod::None
+                            },
+                            VarSpec {
+                                varname: "x".to_string(),
+                                modifier: VarMod::None
+                            }
+                        ]
+                    }),
+                    Part::Lit("/".to_string()),
+                    Part::Lit("here".to_string())
+                ],
+                query: None,
+                path_assoc: None,
+                query_assoc: None
+            })
+        )
     }
 
     #[test]
