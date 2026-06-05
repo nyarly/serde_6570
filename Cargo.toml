@@ -9,9 +9,9 @@ license-file = "LICENSE"
 readme = "README.md"
 homepage = "https://github.com/nyarly/serde_6570"
 repository = "https://github.com/nyarly/serde_6570"
+description = "A Serde implementation for a subset of RFC 6570 URI Template"
 
 [dependencies]
-#mattak_hypermedia = { version = "0.3.0", path = "../mattak_hypermedia" }
 
 serde = { version = "1.0.204", features = ["derive"] }
 
