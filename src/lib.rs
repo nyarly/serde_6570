@@ -36,17 +36,17 @@ pub trait Serde6570 {
 
     fn prefixed(&self, prefix: &str) -> Self;
 
-    fn serialize(
+    fn expand(
         &self,
         policy: FillPolicy,
         context: impl serde::Serialize,
     ) -> Result<IriReferenceString, Error>;
 
+    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
+
     fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error>;
 
     fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error>;
-
-    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
 
     fn template(&self) -> Result<UriTemplateString, Error>;
 
@@ -55,15 +55,10 @@ pub trait Serde6570 {
 
 /// The general entry point for routing. Pass a ResourceMapping in to get its cached parse,
 /// as an Entry. From there you can call methods to template URIs, match strings etc etc.
-///
-/// # Panics
-///
-/// Panics if the routing cache becomes poisoned, which doesn't happen by design.
-/// A panic on this function constitutes a bug.
-pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> impl Serde6570 {
-    InnerSingle {
-        parsed: parsed(rm).unwrap(),
-    }
+pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> Result<impl Serde6570, Error> {
+    Ok(InnerSingle {
+        parsed: parsed(rm)?,
+    })
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
@@ -286,20 +281,12 @@ impl Serde6570 for InnerSingle {
         prefixed
     }
 
-    fn serialize(
+    fn expand(
         &self,
         policy: FillPolicy,
         context: impl serde::Serialize,
     ) -> Result<IriReferenceString, Error> {
         Ok(ser::fill(&self.parsed, policy, context)?.try_into()?)
-    }
-
-    fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error> {
-        self.fill_uritemplate(FillPolicy::NoMissing, vars)
-    }
-
-    fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error> {
-        self.partial_fill_single(vars)
     }
 
     fn contract<T: DeserializeOwned>(&self, uri: Uri) -> Result<T, Error> {
@@ -309,6 +296,14 @@ impl Serde6570 for InnerSingle {
         let de = de::UriDeserializer::for_uri(&uri, parsed, &regex)?;
 
         T::deserialize(de).map_err(Error::from)
+    }
+
+    fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error> {
+        self.fill_uritemplate(FillPolicy::NoMissing, vars)
+    }
+
+    fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error> {
+        self.partial_fill_single(vars)
     }
 
     fn template(&self) -> Result<UriTemplateString, Error> {

@@ -8,8 +8,8 @@ use iri_string::{
 use crate::Error;
 
 use super::{
-    parser::{Expression, Op, Part, VarMod, VarSpec},
     Listable,
+    parser::{Expression, Op, Part, VarMod, VarSpec},
 };
 
 const EMPTY: &str = "";
@@ -138,20 +138,19 @@ fn var_re(op: Op, here: &'static str, nxt: &'static str) -> impl Fn(&VarSpec) ->
         let join = op.joiner();
         match (op, varspec.modifier) {
             // Query and QueryCont would also need "varname=" but! not allowed in the path
-            (Op::PathParam, VarMod::None) =>
-            format!("{var}{join}(?<{var}>[^{here}{nxt}{sep}]*)"),
+            (Op::PathParam, VarMod::None) => format!("{var}{join}(?<{var}>[^{here}{nxt}{sep}]*)"),
 
-            (Op::PathParam, VarMod::Prefix(count)) =>
-            format!("(?<{var}_p{count}>{var}{join}(?:[^{here}{nxt}%{sep}]|%[A-Fa-f0-9]{{2}}|%%){{0,{count}}})"),
+            (Op::PathParam, VarMod::Prefix(count)) => format!(
+                "(?<{var}_p{count}>{var}{join}(?:[^{here}{nxt}%{sep}]|%[A-Fa-f0-9]{{2}}|%%){{0,{count}}})"
+            ),
 
-            (_, VarMod::None) =>
-            format!("(?<{var}>[^{here}{nxt}{sep}]*)"),
+            (_, VarMod::None) => format!("(?<{var}>[^{here}{nxt}{sep}]*)"),
 
-            (_, VarMod::Prefix(count)) =>
-            format!("(?<{var}_p{count}>(?:[^{here}{nxt}%{sep}]|%[A-Fa-f0-9]{{2}}|%%){{0,{count}}})"),
+            (_, VarMod::Prefix(count)) => format!(
+                "(?<{var}_p{count}>(?:[^{here}{nxt}%{sep}]|%[A-Fa-f0-9]{{2}}|%%){{0,{count}}})"
+            ),
 
-            (_, VarMod::Explode) =>
-            format!("(?<{var}>[^{nxt}]*)"),
+            (_, VarMod::Explode) => format!("(?<{var}>[^{nxt}]*)"),
         }
     }
 }
@@ -159,8 +158,11 @@ fn var_re(op: Op, here: &'static str, nxt: &'static str) -> impl Fn(&VarSpec) ->
 pub(super) fn original_string(part: &Part) -> String {
     match part {
         Part::Lit(s) => s.clone(),
-        Part::Expression(exp) | Part::SegPathVar(exp) | Part::SegPathRest(exp) => exp_string(exp),
-        Part::SegVar(exp) | Part::SegRest(exp) => format!("/{}", exp_string(exp)),
+        Part::SegVar(exp)
+        | Part::Expression(exp)
+        | Part::SegPathVar(exp)
+        | Part::SegPathRest(exp) => exp_string(exp),
+        Part::SegRest(exp) => format!("/{}", exp_string(exp)),
     }
 }
 
@@ -277,7 +279,7 @@ fn varspec_string(varspec: &VarSpec) -> String {
 */
 pub(super) fn axum7_vars(vars: &[VarSpec]) -> String {
     format!(
-        "/:{}",
+        ":{}",
         vars.iter()
             .cloned()
             .map(|var| var.varname)

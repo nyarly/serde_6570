@@ -12,7 +12,7 @@ use nom::{
 
 /*
 * Reviewing in 8/25, I remember thinking that RFC 6570 URITemplates couldn't
-* be used to extract a context from a URI. I don't remember why, and am annoyed
+* be used to contract a context from a URI. I don't remember why, and am annoyed
 * that I didn't record that understanding here.
 *
 * The intersection described below (3986,6570,matchit) might be accurate,
@@ -24,7 +24,7 @@ use nom::{
 * Alternatives to consider: a dynamic Nom parser, matchit, from_urlencoded in some
 * combinations
 *
-* Distinguishing: parse from extract here.
+* Distinguishing: parse from contract here.
 *   Parse: what this module does with a language reduced from RFC 6570
 *   Extract: using parsed strings to pull data from a URI
 *   Also: Template: the process described in RFC 6570 to convert a URI tempalte + context into a
@@ -48,7 +48,7 @@ use nom::{
 *
 *
 *
-* Second: how does the extraction work? Is template/extract inverses? (probably not)
+* Second: how does the extraction work? Is expand/contract inverses? (probably not)
 * What about template over the contexts that can be extracted?
 * In terms of parsing, how restrictive is the language?
 * Do we need a type for the context to answer that?
@@ -75,7 +75,7 @@ use nom::{
 * derive(Deserialize) // serde
 * Parsed // this module
 * FromRequestParts // axum
-* extract::Extract // mattak, maybe rename XXX 25-08-11
+* contract::Extract // mattak, renamed from extract -> contract 2026-05-18
 *
 * Derserializer {
 *   template: Parsed
@@ -105,7 +105,7 @@ from which we will be able to build
 * Checked Filled URIs (by requiring all variables have an assignment) [need varlist]
 * Strict URIs (by further requiring that no other variables are supplied [need varlist]
 * matchit routes for Axum (v0.7 or v0.8) [need path, some var structure]
-* regexp to extract path variables as matchit would from a URI [idem]
+* regexp to contract path variables as matchit would from a URI [idem]
 
 lists of variables -> matchit captures?
 sort, concatenate; error on collision
@@ -388,12 +388,15 @@ fn path(i: &str) -> NomResult<'_, Vec<Part>> {
     alt((
         map(
             pair(many1(segment), opt(tail_segment)),
-            |(mut segs, maybe_tail)| match maybe_tail {
-                Some(seg) => {
-                    segs.push(seg);
-                    segs
+            |(segs, maybe_tail)| {
+                let mut segs: Vec<_> = segs.into_iter().flatten().collect();
+                match maybe_tail {
+                    Some(seg) => {
+                        segs.push(seg);
+                        segs
+                    }
+                    None => segs,
                 }
-                None => segs,
             },
         ),
         value(vec![Part::to_lit("/")], tag("/")),
@@ -411,41 +414,44 @@ fn authority(i: &str) -> NomResult<'_, Vec<Part>> {
 }
 
 // segment = segment-literal / segment-variable / segment-pathvar
-fn segment(i: &str) -> NomResult<'_, Part> {
-    alt((segment_variable, segment_pathvar, segment_literal))(i)
+fn segment(i: &str) -> NomResult<'_, Vec<Part>> {
+    alt((segment_pathvar, segment_exps_and_lits))(i)
+    //alt((segment_variable, segment_pathvar, segment_literal))(i)
 }
 
-// tail-segment = segment-rest / segment-pathrest
-fn tail_segment(i: &str) -> NomResult<'_, Part> {
-    alt((segment_rest, segment_pathrest))(i)
-}
-
-// segment-literal = "/" *pchar
-fn segment_literal(i: &str) -> NomResult<'_, Part> {
+// segment-pathvar = "{/" segment-variable-list "}"
+fn segment_pathvar(i: &str) -> NomResult<'_, Vec<Part>> {
     map(
-        recognize(preceded(char('/'), many1_count(pchar))), // test "/" path
-        Part::to_lit,
+        map(
+            delimited(tag("{"), pair(opt(char('/')), segment_var_list), tag("}")),
+            Expression::from_pair,
+        ),
+        |exp| vec![Part::SegPathVar(exp)],
     )(i)
 }
 
-// literals      =  %x21 / %x23-24 / %x26 / %x28-3B / %x3D / %x3F-5B
-// /  %x5D / %x5F / %x61-7A / %x7E / ucschar / iprivate
-// /  pct-encoded
-// authority-literals = literals - "/"
-fn authority_literals(i: &str) -> NomResult<'_, Part> {
+fn segment_exps_and_lits(i: &str) -> NomResult<'_, Vec<Part>> {
     map(
-        recognize(many1_count(alt((
-            satisfy(|ch| {
-                matches!(ch,
-                '\u{21}' | '\u{23}'..='\u{24}' | '\u{26}' |
-                '\u{28}'..='\u{2e}' | '\u{30}'..='\u{3B}' | // not \u{2f} = '/'
-                '\u{3D}' | '\u{3F}'..='\u{5B}' | '\u{5D}' | '\u{5F}' | '\u{61}'..='\u{7A}' | '\u{7E}')
-            }),
-            ucschar,
-            iprivate,
-            pct_encoded,
-        )))),
-        Part::to_lit,
+        pair(
+            recognize(char('/')),
+            many1(alt((
+                map(
+                    recognize(many1_count(pchar)), // test "/" path
+                    Part::to_lit,
+                ),
+                map(
+                    map(
+                        delimited(tag("{"), pair(opt(char('+')), segment_var_list), tag("}")),
+                        Expression::from_pair,
+                    ),
+                    Part::Expression, //XXX
+                ),
+            ))),
+        ),
+        |(_slash, mut parts)| {
+            parts.insert(0, Part::to_lit("/"));
+            parts
+        },
     )(i)
 }
 
@@ -460,15 +466,17 @@ fn segment_variable(i: &str) -> NomResult<'_, Part> {
     )(i)
 }
 
-// segment-pathvar = "{/" segment-variable-list "}"
-fn segment_pathvar(i: &str) -> NomResult<'_, Part> {
+// segment-literal = "/" *pchar
+fn segment_literal(i: &str) -> NomResult<'_, Part> {
     map(
-        map(
-            delimited(tag("{"), pair(opt(char('/')), segment_var_list), tag("}")),
-            Expression::from_pair,
-        ),
-        Part::SegPathVar,
+        recognize(preceded(char('/'), many1_count(pchar))), // test "/" path
+        Part::to_lit,
     )(i)
+}
+
+// pchar = unreserved / pct-encoded / sub-delims / ":" / "@"
+fn pchar(i: &str) -> NomResult<'_, char> {
+    alt((unreserved, pct_encoded, sub_delims, one_of(":@")))(i)
 }
 
 // segment-rest = "/{" [ operator ] variable-list "}"
@@ -509,6 +517,32 @@ fn segment_varspec(i: &str) -> NomResult<'_, VarSpec> {
             varname: varname.to_owned(),
             modifier,
         },
+    )(i)
+}
+
+// tail-segment = segment-rest / segment-pathrest
+fn tail_segment(i: &str) -> NomResult<'_, Part> {
+    alt((segment_rest, segment_pathrest))(i)
+}
+
+// literals      =  %x21 / %x23-24 / %x26 / %x28-3B / %x3D / %x3F-5B
+// /  %x5D / %x5F / %x61-7A / %x7E / ucschar / iprivate
+// /  pct-encoded
+// authority-literals = literals - "/"
+fn authority_literals(i: &str) -> NomResult<'_, Part> {
+    map(
+        recognize(many1_count(alt((
+            satisfy(|ch| {
+                matches!(ch,
+                '\u{21}' | '\u{23}'..='\u{24}' | '\u{26}' |
+                '\u{28}'..='\u{2e}' | '\u{30}'..='\u{3B}' | // not \u{2f} = '/'
+                '\u{3D}' | '\u{3F}'..='\u{5B}' | '\u{5D}' | '\u{5F}' | '\u{61}'..='\u{7A}' | '\u{7E}')
+            }),
+            ucschar,
+            iprivate,
+            pct_encoded,
+        )))),
+        Part::to_lit,
     )(i)
 }
 
@@ -609,11 +643,6 @@ fn tail_operator(i: &str) -> NomResult<'_, char> {
 //
 fn authority_operator(i: &str) -> NomResult<'_, char> {
     one_of("+.;&=,!@|#?")(i)
-}
-
-// pchar = unreserved / pct-encoded / sub-delims / ":" / "@"
-fn pchar(i: &str) -> NomResult<'_, char> {
-    alt((unreserved, pct_encoded, sub_delims, one_of(":@")))(i)
 }
 
 //
@@ -751,6 +780,12 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_single_quotes() {
+        //let parsed =
+        parse("/'{var}'").expect("successful parse");
+    }
+
+    #[test]
     fn test_path_assoc_annotation() {
         let mut parsed = parse("http://example.com/something{/extra*}").expect("successful parse");
         parsed
@@ -823,8 +858,10 @@ mod test {
                     Part::Lit("example.com".to_string())
                 ]),
                 path: vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
                             varname: "user_id".to_string(),
@@ -854,8 +891,10 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
                             varname: "user_id".to_string(),
@@ -883,8 +922,10 @@ mod test {
             parse("/user/{user_id}?something=good{&mysterious}"),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
                             varname: "user_id".to_string(),
@@ -910,8 +951,10 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![
                             VarSpec {
@@ -933,7 +976,8 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
                     Part::SegPathVar(Expression {
                         operator: Op::Path,
                         varspecs: vec![
@@ -956,7 +1000,8 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
                     Part::SegPathVar(Expression {
                         operator: Op::Path,
                         varspecs: vec![VarSpec {
@@ -973,7 +1018,8 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
                     Part::SegRest(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
@@ -990,7 +1036,8 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
                     Part::SegPathRest(Expression {
                         operator: Op::Path,
                         varspecs: vec![VarSpec {
@@ -1007,8 +1054,10 @@ mod test {
             parse(input),
             Ok(Parsed {
                 path: vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
                             varname: "user_id".to_string(),
@@ -1036,8 +1085,10 @@ mod test {
             Ok((
                 "",
                 vec![
-                    Part::Lit("/user".to_string()),
-                    Part::SegVar(Expression {
+                    Part::Lit("/".to_string()),
+                    Part::Lit("user".to_string()),
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
                         operator: Op::Simple,
                         varspecs: vec![VarSpec {
                             varname: "user_id".to_string(),
@@ -1051,18 +1102,27 @@ mod test {
 
     #[test]
     fn test_segment() {
-        assert_eq!(segment("/user"), Ok(("", Part::Lit("/user".to_string()),)));
+        assert_eq!(
+            segment("/user"),
+            Ok((
+                "",
+                vec![Part::Lit("/".to_string()), Part::Lit("user".to_string())],
+            ))
+        );
         assert_eq!(
             segment("/{user_id}"),
             Ok((
                 "",
-                Part::SegVar(Expression {
-                    operator: Op::Simple,
-                    varspecs: vec![VarSpec {
-                        varname: "user_id".to_string(),
-                        modifier: VarMod::None
-                    }]
-                })
+                vec![
+                    Part::Lit("/".to_string()),
+                    Part::Expression(Expression {
+                        operator: Op::Simple,
+                        varspecs: vec![VarSpec {
+                            varname: "user_id".to_string(),
+                            modifier: VarMod::None
+                        }]
+                    })
+                ]
             ))
         )
     }

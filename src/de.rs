@@ -1576,7 +1576,7 @@ mod tests {
         //let rt = RouteTemplateString("/search{?query,kind}".into(), vec![]);
         let rt = ResourceMappingString("/search{?query,extra*}".into(), vec!["extra".into()]);
 
-        let cfg = crate::process(rt);
+        let cfg = crate::process(rt).expect("test case to parse");
         let uri = hyper::Uri::from_static("http://example.com/search?query=test");
         let search: HashMap<String, String> = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
@@ -1598,7 +1598,7 @@ mod tests {
     #[test]
     fn test_path_style_parameter() {
         let rt = ResourceMappingString("/search/{;query,extra*}".into(), vec!["extra".into()]);
-        let cfg = crate::process(rt);
+        let cfg = crate::process(rt).expect("test case to parse");
         let uri = hyper::Uri::from_static("http://example.com/search/;query=test;kind=boardgame");
         let search: HashMap<String, String> = cfg.contract(uri.clone()).expect("deserialize");
         assert_eq!(
@@ -1628,7 +1628,7 @@ mod tests {
     #[test]
     fn test_path_segment_assoc() {
         let rt = ResourceMappingString("/search{/extra*}".into(), vec!["extra".into()]);
-        let cfg = crate::process(rt);
+        let cfg = crate::process(rt).expect("test case to parse");
         let uri = hyper::Uri::from_static("http://example.com/search/query=test/kind=boardgame");
         #[derive(Deserialize, Debug)]
         struct Search {

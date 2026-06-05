@@ -83,10 +83,10 @@ impl<RM: ResourceMapping + 'static> typemap_ors::Key for RMKey<RM> {
 ///
 /// Panics if the routing cache becomes poisoned, which doesn't happen by design.
 /// A panic on this function constitutes a bug.
-pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> impl Serde6570 {
+pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> Result<impl Serde6570, Error> {
     let arcmutex = the_map();
     let mut map = arcmutex.lock().expect("route map not to be poisoned");
-    map.named(rm).expect("routes to be parseable")
+    Ok(map.named(rm)?)
 }
 
 // Entry is a convenience wrapper around the Arc<RwLock<InnerSingle>> - mostly, it mediates reaching into the
@@ -144,13 +144,18 @@ impl Serde6570 for Entry {
         }
     }
 
-    fn serialize(
+    fn expand(
         &self,
         policy: FillPolicy,
         context: impl serde::Serialize,
     ) -> Result<IriReferenceString, Error> {
         let inner = self.inner.read().expect("not poisoned");
-        inner.serialize(policy, context)
+        inner.expand(policy, context)
+    }
+
+    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.contract(url)
     }
 
     fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error> {
@@ -161,11 +166,6 @@ impl Serde6570 for Entry {
     fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error> {
         let inner = self.inner.read().expect("not poisoned");
         inner.partial_fill_single(vars)
-    }
-
-    fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error> {
-        let inner = self.inner.read().expect("not poisoned");
-        inner.contract(url)
     }
 
     fn template(&self) -> Result<UriTemplateString, Error> {
