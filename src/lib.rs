@@ -1,3 +1,6 @@
+#![doc = include_str!("../README.md")]
+
+#[warn(missing_docs)]
 use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
 use axum::{http, response::IntoResponse};
@@ -29,32 +32,65 @@ mod ser;
 
 pub use iri_string::template::context;
 
+/// This is the core trait of the crate - there are two implementators,
+/// and by using a trait we ensure that they're interchangable
 pub trait Serde6570 {
-    fn matchit_route(&self) -> String;
-
-    fn regex(&self) -> Result<Regex, Error>;
-
-    fn prefixed(&self, prefix: &str) -> Self;
-
+    /// Applies a [Serialize](serde::Serialize) to produce a URI
     fn expand(
         &self,
         policy: FillPolicy,
         context: impl serde::Serialize,
     ) -> Result<IriReferenceString, Error>;
 
+    /// Parses a Uri into a [Deserialize](serde::Deserialize)
     fn contract<T: DeserializeOwned>(&self, url: Uri) -> Result<T, Error>;
 
+    /// A convenience method for working with Axum: you can use this to produce compatible matchit_routes
+    /// in order to have Axum route to a handler, and then use Serde to extract parameters from the
+    /// URI
+    fn matchit_route(&self) -> String;
+
+    /// Produces a regular expression that matches URIs that we'd parse; in other words,
+    /// the regular expression matches URIs that we'd produce with expand
+    fn regex(&self) -> Result<Regex, Error>;
+
+    /// Prefixed covers the case where a group of URIs is incorporated into a larger group with a
+    /// common path prefix - sometimes referred to as "mounting" a sub-application.
+    /// ```rust
+    /// # #[derive(Serialize)]
+    /// # struct UserData {
+    /// #     user: String,
+    /// # }
+    /// let rt = process(ResourceMappingString("https://example.com/user/{user}", vec![]))?;
+    ///
+    /// let prefixed = rt.prefixed("/awesome");
+    ///
+    /// let user_data = UserData {
+    ///     user: "nyarly",
+    /// };
+    /// let expanded = rt.expand(FillPolicy::Relaxed, user_data)?;
+    /// assert_eq!(expanded.to_string(), "https://example.com/awesome/user/nyarly");
+    /// ```
+    fn prefixed(&self, prefix: &str) -> Self;
+
+    /// An option for expanding URLs with non-Serialize data. In general, prefer [expand](Serde6570::expand)
     fn fill(&self, vars: impl Context + Listable) -> Result<IriReferenceString, Error>;
 
+    /// Fills some of the parameters of a template and produce a new template with the
+    /// remaining fields available. Useful for producing URIs of "subfamilies" - for example  all
+    /// the posts of a particular user
     fn partial_fill(&self, vars: impl Context + Listable + Clone) -> Result<impl Serde6570, Error>;
 
+    /// Produces a UriTempateString for which see uri_template
     fn template(&self) -> Result<UriTemplateString, Error>;
 
+    /// Returns true if there are no template variables in the template - in other words if the
+    /// process of filling variables is complete and what remains is effectively a URI.
     fn is_closed(&self) -> bool;
 }
 
-/// The general entry point for routing. Pass a ResourceMapping in to get its cached parse,
-/// as an Entry. From there you can call methods to template URIs, match strings etc etc.
+/// The general entry point for routing. Pass a ResourceMapping in to get its cached parse.
+/// Certain performance oriented applications may want to consider [cached::process]
 pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> Result<impl Serde6570, Error> {
     Ok(InnerSingle {
         parsed: parsed(rm)?,
@@ -115,20 +151,26 @@ impl IntoResponse for Error {
     }
 }
 
+/// The input for [process] (and [cached::process])
 pub trait ResourceMapping: Debug + Clone + Hash + Send + Sync + Eq
 where
     Self: 'static,
 {
-    // XXX really nice to have this as an associated method...
-    // Would like this one structs and have it work with Self,
-    // and maybe with Enum instances.
+    /// Simply returns the string that should be parsed into a Serde6570
+    /// It has to conform to the RFC 6570 grammar, with additional restrictions
+    /// that amount to "it should render into a valid URI"
     fn route_template(&self) -> String;
 
+    /// For level 4 of RFC 6570, we need to be able to specify that certain fields
+    /// are associated lists in order to sensibly parse them. You can generally leave this empty,
+    /// and only return such a list if you know what fields should be treated specially.
     fn assoc_fields(&self) -> Vec<String> {
         vec![]
     }
 }
 
+/// A convenient implementation of [ResourceMapping] - the two fields are the route_template and
+/// assoc_fields
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ResourceMappingString(pub String, pub Vec<String>);
 

@@ -76,8 +76,8 @@ impl<RM: ResourceMapping + 'static> typemap_ors::Key for RMKey<RM> {
     type Value = Arc<Mutex<Map<RM>>>;
 }
 
-/// The general entry point for routing. Pass a ResourceMapping in to get its cached parse,
-/// as an Entry. From there you can call methods to template URIs, match strings etc etc.
+/// The general entry point for routing. Pass a [ResourceMapping] in to get its cached parse,
+/// as an [Entry]. From there you can call methods to template URIs, match strings etc etc.
 ///
 /// # Panics
 ///
@@ -100,6 +100,11 @@ pub fn process<RM: ResourceMapping + 'static>(rm: RM) -> Result<impl Serde6570, 
 // all the things a given route might need and cache that. For the time being, we'll render each
 // time (and just get read locks), but at some point in the future there's another round of
 // over-engineering to tackle
+
+/// This is the cached implementor for Serde6570; for a long running application,
+/// you probably want to prefer this (and the corresponding [process] that produces it)
+/// over the default (private) struct. For one off usage, the machinery for safely
+/// caching the templates may be too heavyweight.
 #[derive(Clone)]
 pub struct Entry {
     inner: Arc<RwLock<InnerSingle>>,
