@@ -182,4 +182,9 @@ impl Serde6570 for Entry {
         let inner = self.inner.read().expect("not poisoned");
         inner.is_closed()
     }
+
+    fn template_vars(&self) -> Vec<String> {
+        let inner = self.inner.read().expect("not poisoned");
+        inner.template_vars()
+    }
 }

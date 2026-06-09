@@ -87,6 +87,10 @@ pub trait Serde6570 {
     /// Returns true if there are no template variables in the template - in other words if the
     /// process of filling variables is complete and what remains is effectively a URI.
     fn is_closed(&self) -> bool;
+
+    /// Returns a list of unbound template variables; available for use by macro processing,
+    /// not recommended for live application usage
+    fn template_vars(&self) -> Vec<String>;
 }
 
 /// The general entry point for routing. Pass a ResourceMapping in to get its cached parse.
@@ -356,6 +360,26 @@ impl Serde6570 for InnerSingle {
 
     fn is_closed(&self) -> bool {
         self.expressions().is_empty()
+    }
+
+    fn template_vars(&self) -> Vec<String> {
+        self.parsed
+            .parts_iter()
+            .filter_map(|part| match part {
+                Part::Lit(_) => None,
+                Part::Expression(expression)
+                | Part::SegPathVar(expression)
+                | Part::SegRest(expression)
+                | Part::SegPathRest(expression) => Some(
+                    expression
+                        .varspecs
+                        .iter()
+                        .map(|vs| vs.varname.clone())
+                        .collect::<Vec<_>>(),
+                ),
+            })
+            .flatten()
+            .collect::<Vec<_>>()
     }
 }
 
