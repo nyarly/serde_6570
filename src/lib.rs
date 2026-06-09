@@ -57,19 +57,22 @@ pub trait Serde6570 {
     /// Prefixed covers the case where a group of URIs is incorporated into a larger group with a
     /// common path prefix - sometimes referred to as "mounting" a sub-application.
     /// ```rust
+    /// # use serde::Serialize;
+    /// # use serde_6570::{process, ResourceMappingString, FillPolicy, Serde6570};
+    ///
     /// # #[derive(Serialize)]
     /// # struct UserData {
     /// #     user: String,
     /// # }
-    /// let rt = process(ResourceMappingString("https://example.com/user/{user}", vec![]))?;
+    /// let rt = process(ResourceMappingString("https://example.com/user/{user}".to_string(), vec![])).unwrap();
     ///
     /// let prefixed = rt.prefixed("/awesome");
     ///
     /// let user_data = UserData {
-    ///     user: "nyarly",
+    ///     user: "nyarly".to_string(),
     /// };
-    /// let expanded = rt.expand(FillPolicy::Relaxed, user_data)?;
-    /// assert_eq!(expanded.to_string(), "https://example.com/awesome/user/nyarly");
+    /// let expanded = prefixed.expand(FillPolicy::Relaxed, user_data).unwrap();
+    /// assert_eq!(expanded.to_string(), "https://example.com/awesome/user/nyarly".to_string());
     /// ```
     fn prefixed(&self, prefix: &str) -> Self;
 

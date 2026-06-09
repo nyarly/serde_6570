@@ -13,6 +13,9 @@ It means that we can write a RFC 6570 template,
 and use it to [expand](Serde6570::expand) from any [Serialize](serde::Serialize) data
 to a URI.
 ```rust
+use serde::Serialize;
+use serde_6570::{process, ResourceMappingString, FillPolicy, Serde6570};
+
 #[derive(Serialize)]
 struct PostData {
     user: String,
@@ -20,31 +23,33 @@ struct PostData {
 }
 
 let post_data = PostData {
-    user: "nyarly",
+    user: "nyarly".into(),
     post_id: 187
-}
+};
 
-let rt = process(ResourceMappingString("https://example.com/user/{user}/post/{post_id}", vec![]))?;
-let expanded = rt.expand(FillPolicy::Relaxed, post_data)?;
-assert_eq!(expanded.to_string(), "https://example.com/user/nyarly/post/187");
+let rt = process(ResourceMappingString("https://example.com/user/{user}/post/{post_id}".into(), vec![])).unwrap();
+let expanded = rt.expand(FillPolicy::Relaxed, post_data).unwrap();
+assert_eq!(expanded.to_string(), "https://example.com/user/nyarly/post/187".to_string());
 ```
 
 We can also use the same template to [contract](Serde6570::contract)
 from a URI
 into a [Deserialize](serde::Deserialize):
 ```rust
-#[derive(Deserialize,PartialEq)]
+use serde::Deserialize;
+use serde_6570::{process, ResourceMappingString, FillPolicy, Serde6570};
+#[derive(Deserialize,PartialEq,Debug)]
 struct PostData {
     user: String,
     post_id: u16,
 }
 
-let rt = process(ResourceMappingString("https://example.com/user/{user}/post/{post_id}", vec![]))?;
+let rt = process(ResourceMappingString("https://example.com/user/{user}/post/{post_id}".into(), vec![])).unwrap();
 
-let post_data = rt.contract("https://example.com/user/nyarly/post/187".into())?;
+let post_data: PostData = rt.contract("https://example.com/user/nyarly/post/187".parse().unwrap()).unwrap();
 
 assert_eq!(post_data, PostData {
-    user: "nyarly",
+    user: "nyarly".into(),
     post_id: 187
 });
 ```
